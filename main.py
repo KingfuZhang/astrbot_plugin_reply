@@ -13,8 +13,8 @@ from typing import Dict, List, Union
     name="智能回复",
     desc="支持文字、图片、正则匹配的自定义关键词回复插件",
     version="v2.0",
-    author="yahaya",
-    repo="https://github.com/yahayao/astrbot_plugin_reply"
+    author="小卡拉米",
+    repo="https://github.com/MUxiaokalami/astrbot_plugin_reply"
 )
 class KeywordReplyPlugin(Star):
     def __init__(self, context: Context):
