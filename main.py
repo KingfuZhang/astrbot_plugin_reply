@@ -8,9 +8,9 @@ from astrbot.api import logger
 import astrbot.api.message_components as Comp
 
 @register(
-    name="reply",
+    name="QQ群自定义关键词回复",
     desc="自定义关键词回复插件，支持文字、图片混合回复，群组独立配置，关键词管理，@用户回复，配置热切换。",
-    version="v2.5",
+    version="v1.0",
     author="小卡拉米",
     repo="https://github.com/MUxiaokalami/astrbot_plugin_reply"
 )
@@ -35,7 +35,7 @@ class KeywordReplyPlugin(Star):
         
         # 立即加载管理后台配置
         self._reload_settings()
-        logger.info(f"reply插件初始化完成，配置: {self.get_settings()}")
+        logger.info(f"QQ群自定义关键词回复插件初始化完成，配置: {self.get_settings()}")
 
     def _reload_settings(self):
         """重新加载管理后台配置"""
@@ -147,7 +147,7 @@ class KeywordReplyPlugin(Star):
         return any(re.match(p, text, re.IGNORECASE) for p in patterns)
 
     def _parse_reply_to_message_chain(self, content: str):
-        """解析回复内容为消息链，保留原始换行格式"""
+        """解析回复内容为消息链，完全保留原始格式"""
         content = content.strip()
         if not content:
             return []
@@ -161,46 +161,58 @@ class KeywordReplyPlugin(Star):
                 return [Comp.Image.fromFileSystem(img_path)]
         
         chain = []
-        lines = content.splitlines()
-        img_pattern = r'^\s*\[(图片|img)\](\S+)\s*$'
-        mixed_pattern = r'^(.*)\[(图片|img)\](\S+)\s*$'
         
-        for line in lines:
-            line = line.rstrip()  # 保留行首空格，只去掉行尾空格
+        # 检查是否包含图片标记
+        if '[图片]' in content or '[img]' in content:
+            # 处理包含图片的混合内容
+            lines = content.splitlines()
+            img_pattern = r'\[(图片|img)\](\S+)'
             
-            # 检查是否为纯图片行
-            match_img = re.match(img_pattern, line, re.IGNORECASE)
-            if match_img:
-                img_path = match_img.group(2).strip()
-                if img_path:
-                    if img_path.lower().startswith(('http://', 'https://')):
-                        chain.append(Comp.Image.fromURL(img_path))
+            current_text = ""
+            for line in lines:
+                # 查找图片标记
+                matches = list(re.finditer(img_pattern, line, re.IGNORECASE))
+                
+                if not matches:
+                    # 没有图片标记的行，直接添加到当前文本
+                    current_text += line + "\n"
+                else:
+                    # 有图片标记的行，需要拆分处理
+                    last_end = 0
+                    for match in matches:
+                        # 添加图片前的文本
+                        text_before = line[last_end:match.start()]
+                        if text_before.strip():
+                            current_text += text_before
+                        
+                        # 如果有累积的文本，先添加
+                        if current_text.strip():
+                            chain.append(Comp.Plain(current_text))
+                            current_text = ""
+                        
+                        # 添加图片
+                        img_path = match.group(2).strip()
+                        if img_path:
+                            if img_path.lower().startswith(('http://', 'https://')):
+                                chain.append(Comp.Image.fromURL(img_path))
+                            else:
+                                chain.append(Comp.Image.fromFileSystem(img_path))
+                        
+                        last_end = match.end()
+                    
+                    # 添加图片后的剩余文本
+                    remaining_text = line[last_end:]
+                    if remaining_text.strip():
+                        current_text += remaining_text + "\n"
                     else:
-                        chain.append(Comp.Image.fromFileSystem(img_path))
-                continue
-                
-            # 检查是否为图文混合行
-            match_mixed = re.match(mixed_pattern, line, re.IGNORECASE)
-            if match_mixed:
-                text_part = match_mixed.group(1).strip()
-                img_path = match_mixed.group(3).strip()
-                
-                if text_part:
-                    chain.append(Comp.Plain(text_part))
-                if img_path:
-                    if img_path.lower().startswith(('http://', 'https://')):
-                        chain.append(Comp.Image.fromURL(img_path))
-                    else:
-                        chain.append(Comp.Image.fromFileSystem(img_path))
-                continue
-                
-            # 纯文本行 - 保留原始换行，添加换行符
-            if line.strip():
-                chain.append(Comp.Plain(line + "\n"))
-        
-        # 如果最后一个是文本且有换行符，去掉最后一个换行符
-        if chain and isinstance(chain[-1], Comp.Plain) and chain[-1].text.endswith("\n"):
-            chain[-1] = Comp.Plain(chain[-1].text.rstrip("\n"))
+                        current_text += "\n"
+            
+            # 添加最后剩余的文本
+            if current_text.strip():
+                chain.append(Comp.Plain(current_text))
+        else:
+            # 纯文本内容，直接返回一个包含所有文本的 Plain 对象
+            chain.append(Comp.Plain(content))
         
         return chain
 
@@ -229,19 +241,38 @@ class KeywordReplyPlugin(Star):
             max_count = settings.get('max_keywords_per_group', 50)
             yield event.plain_result(f"❌ 关键词数量已达上限（{max_count}个）")
             return
+        
+        # 获取原始消息内容
         full_message = event.get_message_str()
-        args = full_message.replace("/添加回复", "").replace("添加回复", "").strip()
+        
+        # 移除命令前缀部分
+        command_prefix1 = "/添加回复"
+        command_prefix2 = "添加回复"
+        
+        # 去除命令前缀
+        if full_message.startswith(command_prefix1):
+            args = full_message[len(command_prefix1):].strip()
+        elif full_message.startswith(command_prefix2):
+            args = full_message[len(command_prefix2):].strip()
+        else:
+            yield event.plain_result("❌ 格式错误，请在消息前添加命令前缀：\"/添加回复\"")
+            return
+
+        # 使用第一个"|"作为分隔符
         parts = args.split("|", 1)
         if len(parts) != 2:
-            yield event.plain_result(
-                "❌ 格式错误，正确格式：/添加回复 关键字|回复内容\n支持多行、图文混合、多个[图片]链接"
-            )
+            yield event.plain_result("❌ 格式错误，正确格式：/添加回复 关键字|回复内容")
             return
+        
         keyword = parts[0].strip()
-        reply_content = parts[1].strip()
+        # 保留回复内容的原始格式，包括空格和换行
+        reply_content = parts[1]
+        
         if not keyword:
             yield event.plain_result("❌ 关键字不能为空")
             return
+        
+        # 验证图片路径
         chain_preview = self._parse_reply_to_message_chain(reply_content)
         for ele in chain_preview:
             if isinstance(ele, Comp.Image):
@@ -250,18 +281,21 @@ class KeywordReplyPlugin(Star):
                 if img_path and not self._is_image_path(img_path):
                     yield event.plain_result(f"❌ 图片路径格式不正确或未启用：{img_path}")
                     return
+        
         reply_data = {
-            "raw": reply_content,
+            "raw": reply_content,  # 保存原始内容，包括所有格式
             "enabled": settings.get("default_enabled", True)
         }
+        
         if group_id and settings.get("group_separate", True):
             group_cfg = self._get_group_config(group_id)
             group_cfg[keyword] = reply_data
         else:
             global_cfg = self._get_global_config()
             global_cfg[keyword] = reply_data
+            
         self._save_config()
-        yield event.plain_result(f"✅ 已添加关键词回复：{keyword}\n内容预览：\n{reply_content[:200]}")
+        yield event.plain_result(f"✅ 已添加关键词回复：{keyword}")
 
     @filter.command("查看回复")
     async def list_replies(self, event: AstrMessageEvent):
@@ -308,11 +342,27 @@ class KeywordReplyPlugin(Star):
         if not self._is_admin(event):
             yield event.plain_result("❌ 权限不足，需要管理员权限")
             return
-        full_msg = event.get_message_str()
-        keyword = full_msg.replace("/删除回复", "").replace("删除回复", "").strip()
+            
+        # 获取原始消息内容
+        full_message = event.get_message_str()
+        
+        # 移除命令前缀部分
+        command_prefix1 = "/删除回复"
+        command_prefix2 = "删除回复"
+        
+        # 去除命令前缀
+        if full_message.startswith(command_prefix1):
+            keyword = full_message[len(command_prefix1):].strip()
+        elif full_message.startswith(command_prefix2):
+            keyword = full_message[len(command_prefix2):].strip()
+        else:
+            yield event.plain_result("❌ 格式错误，请在消息前添加命令前缀：\"/删除回复\"")
+            return
+            
         if not keyword:
             yield event.plain_result("❌ 请提供要删除的关键字")
             return
+            
         deleted = False
         if group_id:
             group_cfg = self._get_group_config(group_id)
@@ -327,6 +377,7 @@ class KeywordReplyPlugin(Star):
         if not deleted:
             yield event.plain_result(f"❌ 未找到关键词：{keyword}")
             return
+            
         self._save_config()
         yield event.plain_result(f"✅ 已删除关键词：{keyword}")
 
@@ -457,7 +508,7 @@ class KeywordReplyPlugin(Star):
             chain.append(Comp.At(qq=event.get_sender_id()))
             chain.append(Comp.Plain("\n"))  # 确保@后换行
         
-        # 解析回复内容
+        # 解析回复内容 - 完全保留原始格式
         reply_chain = self._parse_reply_to_message_chain(raw_content)
         chain.extend(reply_chain)
         
