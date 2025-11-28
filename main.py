@@ -505,12 +505,17 @@ class KeywordReplyPlugin(Star):
         
         # 群聊中@用户
         if reply_with_at and group_id:
+            # 使用 Comp.At 组件
             chain.append(Comp.At(qq=event.get_sender_id()))
-            chain.append(Comp.Plain("\n"))  # 确保@后换行
-        
-        # 解析回复内容 - 完全保留原始格式
-        reply_chain = self._parse_reply_to_message_chain(raw_content)
-        chain.extend(reply_chain)
+            # 添加一个换行符的 Plain 组件
+            chain.append(Comp.Plain("\n"))
+            # 解析回复内容
+            reply_chain = self._parse_reply_to_message_chain(raw_content)
+            chain.extend(reply_chain)
+        else:
+            # 不@用户，直接回复
+            reply_chain = self._parse_reply_to_message_chain(raw_content)
+            chain.extend(reply_chain)
         
         if chain:
             yield event.chain_result(chain)
